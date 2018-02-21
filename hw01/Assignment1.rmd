@@ -204,7 +204,7 @@ ggplot(part2,aes(x=Medal_Type_Count,y=reorder(Country,Medal_Type_Count)))+geom_p
 
 #Adjusted based on gold medals + population
 sdf = part2[order(-part2[,4],-part2[,6]),]
-ggplot(sdf,aes(x=Medal_Type_Count,y=reorder(Country,Population)))+geom_point(color="Blue",size=2.5,alpha=0.6) + xlab("Gold Medal Count") + ylab("Country") + ggtitle("Adjusted ranking based for gold medal count based on population") + theme_economist()+ scale_x_continuous(breaks = seq(0,175,25))
+ggplot(sdf,aes(x=Medal_Type_Count,y=Country))+geom_point(color="Blue",size=2.5,alpha=0.6) + xlab("Gold Medal Count") + ylab("Country") + ggtitle("Adjusted ranking based for gold medal count based on population") + theme_economist()+ scale_x_continuous(breaks = seq(0,175,25))
 
 #Adjusted based on GDP
 
@@ -212,7 +212,7 @@ ggplot(sdf,aes(x=Medal_Type_Count,y=reorder(Country,GDP.per.Capita,na.rm=TRUE)))
 
 ```
   
-Generally the countries that have a higher GDP per capita tend to do well overallat winter olympics and more specifically with respect to their Gold Medal Count, in this case.
+Generally the countries that have a higher GDP per capita tend to do well overallat winter olympics and more specifically with respect to their Gold Medal Count, in this case, for examples countries like Switzerland and Sweden
   
   
 ##Question 3 Part 1
@@ -238,31 +238,45 @@ combined_cc = merge(combined_temp,cc,by=c("Year","City"))
 combined_cc$`Host Country` = str_trim(combined_cc$`Host Country`,"left")
 host_adv = subset(combined_cc,Country==`Host Country`)
 
-host_adv_gp = group_by(host_adv,Country,Medal)
-host_adv_gps = summarize(host_adv_gp,count=n_distinct(Year,City,Sport,Discipline,Event,Gender))
+host_adv_gp = group_by(host_adv,Country,Year)
+host_adv_gps = summarize(host_adv_gp,count=n_distinct(Year,City,Sport,Discipline,Event,Gender,Medal))
 reorderby_host = aggregate(count ~ Country,host_adv_gps,sum)
 host_adv_gps = merge(host_adv_gps,reorderby_host,by="Country")
-colnames(host_adv_gps) = c("HC Country","HC Medal","Medal_Type_Count_HC","Medals when hosted")
+colnames(host_adv_gps) = c("HC Country","Year","Medal_Type_Count_HC","Medals when hosted")
 
 host_total_medals = subset(host_adv_gps,select=c("HC Country","Medals when hosted"))
 host_total_medals = host_total_medals[!duplicated(host_total_medals),]
 
+#Number of times olympics hosted
+hc_year = subset(host_adv_gps,select=c("HC Country","Year"))
+hc_year = group_by(hc_year,hc_year$`HC Country`)
+hc_year = summarise(hc_year,count=n())
+
+host_total_medals$`Medals when hosted` = host_total_medals$`Medals when hosted`/hc_year$count
+host_total_medals$`Medals when hosted` = as.integer(host_total_medals$`Medals when hosted`)
+
 total_medals = subset(combined_summary_temp,select=c("Country","Olympics medaled in","Total_Count"))
 total_medals = total_medals[!duplicated(total_medals),]
 colnames(host_total_medals) = c("Country","Medals when hosted")
+
 host_combined = merge(host_total_medals,total_medals,by="Country")
-host_combined["Remaining Count"] = (host_combined$Total_Count - host_combined$`Medals when hosted`)/(host_combined$`Olympics medaled in`-1)
 
-host_combined$`Remaining Count` = as.integer(host_combined$`Remaining Count`)
+colnames(hc_year) = c("Country","count")
+host_combined = merge(host_combined,hc_year,by="Country")
 
+host_combined["Remaining_participation"] = host_combined$`Olympics medaled in`- host_combined$count
 
-interactive3 = ggplot(host_combined,aes(x=host_combined$`Medals when hosted`,y=host_combined$`Remaining Count`,text=paste("Country: ",host_combined$Country)))+geom_point(alpha=0.5,size=2.5)+xlab("Medals won when hosted the games")+ geom_abline(intercept = 0,slope = 1) + ylab("Mean value of medals won for rest of the olympics")+ggtitle("Comparative Study of Host Country Advantage") + xlim(0,90) + ylim(0,90) + theme_minimal()
+host_combined["Average_Rest"] = host_combined$Total_Count/host_combined$Remaining_participation
+
+host_combined$Average_Rest = as.integer(host_combined$Average_Rest)
+
+interactive3 = ggplot(host_combined,aes(x=host_combined$`Medals when hosted`,y=host_combined$`Average_Rest`,text=paste("Country: ",host_combined$Country)))+geom_point(alpha=0.5,size=2.5)+xlab("Medals won when hosted the games")+ geom_abline(intercept = 0,slope = 1) + ylab("Mean value of medals won for rest of the olympics")+ggtitle("Comparative Study of Host Country Advantage") + xlim(0,90) + ylim(0,90) + theme_minimal()
 interactive3
 
 ```
   
   
-This visualization allows us to contrast the total medals achieved when a country was hosting the olympics to the average of all medals obtained when the country was not hosting.  The plot suggests an evidence or pattern that suggests host country advantage, as most of the observations fall on the right side of the 45 degree line in the scatterplot, thereby indicating influence of host country advantage on the medal tally.
+This visualization allows us to contrast the total medals achieved when a country was hosting the olympics to the average of all medals obtained when the country was not hosting.  Although the analysis needs more scrutiny, the plot suggests an evidence or pattern that suggests host country advantage, as many of the observations fall on the right side of the 45 degree line in the scatterplot, thereby indicating influence of host country advantage on the medal tally.
   
   
 ## Question 4
