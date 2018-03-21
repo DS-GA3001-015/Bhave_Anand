@@ -2,3 +2,4 @@ hw01/**/*.csv
 hw02/**/*.csv
 hw02/**/*.xlsx
 hw02/**/*.xls
+hw02/**/*.geojson

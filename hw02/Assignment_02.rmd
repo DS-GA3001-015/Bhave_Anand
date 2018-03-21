@@ -39,9 +39,11 @@ fires <- read_csv("severe_incidents.csv")
 fires = fires[!(fires$Longitude=="-73.349799"),]
 fires = fires[!(fires$Longitude=="-78.8653985"),]
 fires = fires[!(fires$Longitude=="-74.8161585"),]
-fires = subset(fires,Longitude >= -74.6768 & fires$Longitude <= -73.2816 & Latitude >= 40.4114 &  Latitude <= 40.9820)
+#fires = subset(fires,Longitude >= -74.6768 & fires$Longitude <= -73.2816 & #Latitude >= 40.4114 &  Latitude <= 40.9820)
 
-#print (nrow(fires))
+fires = subset(fires,Longitude > -74.257159 & fires$Longitude < -73.699215 & Latitude > 40.495992 &  Latitude < 40.915568)
+
+print (nrow(fires))
 
 content <- paste("Incident:",fires$INCIDENT_TYPE_DESC,"<br/>",
                  "Property Type:",fires$PROPERTY_USE_DESC,"<br/>",
