@@ -1,0 +1,337 @@
+---
+title: "Assignment 2"
+author: "Anand Bhave"
+date: "16 March 2018"
+output: 
+  html_document:
+    keep_md: true
+
+---
+```{r setup, include=FALSE}
+#knitr::opts_chunk$set(echo = FALSE)
+library(knitr)
+opts_chunk$set(fig.path="images/",
+               cache.path="cache/",
+               cache=FALSE,
+               echo=TRUE,
+               message=FALSE,
+               warning=FALSE) 
+```
+  
+## 1. Location of Severe Fires  
+  
+
+```{r fig.width=8,fig.height=6}
+library(dplyr)
+library(ggthemes)
+library(ggplot2)
+library(plotly)
+library(leaflet)
+library(readr)
+library(RColorBrewer)
+library(geosphere)
+library(datetime)
+
+#Read in the CSV Files
+
+fires <- read_csv("severe_incidents.csv")
+
+fires = fires[!(fires$Longitude=="-73.349799"),]
+fires = fires[!(fires$Longitude=="-78.8653985"),]
+fires = fires[!(fires$Longitude=="-74.8161585"),]
+fires = subset(fires,Longitude >= -74.6768 & fires$Longitude <= -73.2816 & Latitude >= 40.4114 &  Latitude <= 40.9820)
+
+#print (nrow(fires))
+
+content <- paste("Incident:",fires$INCIDENT_TYPE_DESC,"<br/>",
+                 "Property Type:",fires$PROPERTY_USE_DESC,"<br/>",
+                 "Address:",paste(fires$STREET_HIGHWAY,fires$ZIP_CODE,sep=" "),"<br/>",
+                 "Borough:",fires$BOROUGH_DESC,"<br/>")
+f <- leaflet(fires) %>% setView(lng = -74.0156491, lat = 40.7022541, zoom = 10) %>% addTiles('http://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png')
+
+f %>% addCircles(col="Orange",popup = content)
+```
+  
+  
+## 2. Layers and Clusters  
+  
+  
+### a) Color by Type of Property  
+  
+  
+For this question, to inform the reader about the property types of the severe fire incidents, following methodology was used,
+  
+1. The number of original distinct categories for properties total to 87.  
+2. In order to maintain conciseness for the visualization, these categories were bucketed into 5 categories based on their similarity with other property types.  
+3. Finally, the main categories were,  
+  a. Residential property
+  b. Restaurants and Hotels
+  c. HealthCare Facilities
+  d. Stores and Services
+  e. Recreation, Study places and Other  
+    
+The following visualization shows an interactive display of the affected property types.  
+  
+```{r fig.width=8,fig.height=6}
+
+
+
+off <- fires$PROPERTY_USE_DESC 
+
+fccsel <- NA
+fccsel <- ifelse(off=="429 - Multifamily dwelling" | off=="419 - 1 or 2 family dwelling" | off=="962 - Residential street, road or residential driveway" | off=="400 - Residential, other", "Residential", fccsel)
+
+fccsel <- ifelse(off=="162 - Bar or nightclub" | off=="449 - Hotel/motel, commercial" | off=="161 - Restaurant or cafeteria" | off=="160 - Eating, drinking places, other" | off=="439 - Boarding/rooming house, residential hotels" | off=="460 - Dormitory-type residence, other" | off=="459 - Residential board and care" | off=="161 - Restaurant or cafeteria", "Restaurants and Hotels", fccsel)
+
+fccsel <- ifelse(off=="311 - 24-hour care Nursing homes, 4 or more persons" | off=="322 - Alcohol or substance abuse recovery center" | off=="331 - Hospital - medical or psychiatric" | off=="340 - Clinics, doctors offices, hemodialysis cntr, other" | off=="342 - Doctor, dentist or oral surgeon office", "Health Care Facilities", fccsel)
+
+fccsel <- ifelse(off=="500 - Mercantile, business, other" | off=="511 - Convenience store" | off=="519 - Food and beverage sales, grocery store" | off=="549 - Specialty shop" | off=="564 - Laundry, dry cleaning" | off=="569 - Professional supplies, services" | off=="571 - Service station, gas station" | off=="579 - Motor vehicle or boat sales, services, repair" | off=="580 - General retail, other" | off=="581 - Department or discount store" | off=="592 - Bank" | off=="596 - Post office or mailing firms" | off=="599 - Business office" | off=="629 - Laboratory or science lababoratory" | off=="635 - Computer center", "Stores & Services", fccsel)
+
+fccsel <- ifelse(is.na(fccsel), "Recreation, Study & Other", fccsel)
+
+fires$fccsel1 <- fccsel
+
+pal = colorFactor("Set2", domain = fires$fccsel1) # Grab a palette
+color_fccsel1 = pal(fires$fccsel1)
+new_content <- paste("Incident:",fires$INCIDENT_TYPE_DESC,"<br/>",
+                 "Property Type:",fires$PROPERTY_USE_DESC,"<br/>",
+                 "Property Category:",fires$fccsel1,"<br/>",
+                 "Borough:",fires$BOROUGH_DESC,"<br/>")
+f_2a <- f %>% addCircles(color = color_fccsel1,popup = new_content) %>% addLegend(pal = pal, values = ~fires$fccsel1, title = "Affected Property Types",position = "topleft")
+f_2a
+```
+
+  
+### b) Clusters    
+  
+In order to provide a high-level perspective to the user about the fire incidents, clusters are used and selecting any of the cluster the reader can zoom into the area of his interest to view fire incidents across that area.  
+  
+```{r fig.width=8,fig.height=6}
+f_2b <- f %>% addCircleMarkers(color = color_fccsel1,popup = new_content,clusterOptions = markerClusterOptions()) %>% addLegend(pal = pal, values = ~fires$fccsel1, title = "Affected Property Types",position = "topleft")
+f_2b
+
+```
+  
+  
+### Location of FireStations  
+  
+In order to understand how a particular incident is contained by the fire authorities, the knowledge and precise location of Fire Stations is essential.    
+The following layered visualization provides a insight into the location of fire incidents coupled with the location of fire stations in a cluster format, categorized by property types.   
+  
+```{r fig.width=8,fig.height=6}
+firestations = read_csv('FDNY_Firehouse_Listing.csv')
+addn_content_fire_incidents <- paste("Incident:",fires$INCIDENT_TYPE_DESC,"<br/>",
+                 "Property Type:",fires$PROPERTY_USE_DESC,"<br/>",
+                 "Property Category:",fires$fccsel1,"<br/>",
+                 "Borough:",fires$BOROUGH_DESC,"<br/>",
+                 "Units on Scene:",fires$UNITS_ONSCENE,"<br/>")
+
+addn_content_fire_stations <- 
+  paste("FireStation Address:",firestations$FacilityAddress,"<br/>",
+        "Borough:",firestations$Borough,"<br/>")
+
+f_3a <- leaflet() %>% setView(lng = -74.0156491, lat = 40.7022541, zoom = 10) %>% addTiles('http://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',group = 'baselayer')
+
+f_3a_addn <- f_3a %>% 
+  
+  addCircleMarkers(data = fires, color = color_fccsel1,popup =   addn_content_fire_incidents,radius=fires$UNITS_ONSCENE,clusterOptions = markerClusterOptions(),group = "Fire Incidents") %>% 
+  
+  addLegend(pal = pal, values = fires$fccsel1, title = "Affected Property Types",position = "topleft", group = "Fire Incidents") 
+  
+  f_3a_addn<- f_3a_addn %>% addCircleMarkers(data = firestations,color = 'Red',clusterOptions = markerClusterOptions(),group = "Fire Stations", popup = addn_content_fire_stations) %>% 
+  
+  addLayersControl(baseGroups = c("baselayer"), overlayGroups = c("Fire Incidents", "Fire Stations")) 
+f_3a_addn
+```
+
+  
+### Distance from FireHouse and Response Time  
+
+  
+## A)
+  
+The following figure elaborates more on the concept of locating the nearest firestations to the incident of fire.  
+The red dots signify the location of firestations across five boroughs. For each incident of fire, a line has been drawn to its nearest firestation. This enables us to visualize and get a overview of how the fire department would deploy its resources to prevent and contain severe fire incidents.  
+  
+```{r fig.width=8,fig.height=6}
+
+fs_df = data.frame(firestations$Longitude,firestations$Latitude)
+fi_df = data.frame(fires$Longitude,fires$Latitude,fires$INCIDENT_DATE_TIME,fires$ARRIVAL_DATE_TIME,fires$BOROUGH_DESC,fires$fccsel1)
+#fi_df$Distance_miles = NA
+
+fs_df = fs_df[complete.cases(fs_df),]
+
+#print (nrow(fs_df))
+
+res = function(A,B){
+  min=9999
+  long_fs = 0
+  lat_fs = 0
+  for(i in 1:nrow(A)){
+    if(!is.na(fs_df$firestations.Longitude) && !is.na(fs_df$firestations.Latitude)){
+      ans = (distHaversine(c(A[i,1],A[i,2]),B))
+      ans = as.numeric(ans)
+      ans=ans/1600
+      #print (paste(A[i,1],A[i,2],B[1],B[2],ans))
+      #print(ans)
+      if (min > ans) {
+        min=ans
+        long_fs = A[i,1]
+        lat_fs = A[i,2]
+      }
+    }
+  }
+  ls = list(min,long_fs,lat_fs)
+  return (ls)
+}
+
+for(j in 1:nrow(fi_df)){
+  if(!is.na(fi_df[j,1]) && !is.na(fi_df[j,2])){
+    answer = res(fs_df,c(fi_df[j,1],fi_df[j,2]))
+    fi_df[j,"Distance_miles_1"] = answer[1]
+    fi_df[j,"Nearest_Long"] = answer[2]
+    fi_df[j,"Nearest_Lat"] = answer[3]
+  }
+  else{
+    fi_df[j,"Distance_miles_1"] = NA
+    fi_df[j,"Nearest_Long"] = NA
+    fi_df[j,"Nearest_Lat"] = NA
+  }
+}
+  #detailed_fire_incidents = fi_df
+colnames(fi_df) = c("Longitude","Latitude","INCIDENT_DATE_TIME","ARRIVAL_DATE_TIME","Borough_Desc","fccsel1","Distance_miles_1","Nearest_FS_Longitude","Nearest_FS_Latitude")
+  
+#within(fi_df,rm(Distance_miles))
+
+```
+
+
+```{r fig.width=8,fig.height=6}
+
+
+fi_df_duplicate = fi_df
+
+if((class(fi_df$INCIDENT_DATE_TIME)[1]=='factor')){
+fi_df$INCIDENT_DATE_TIME = as.character(fi_df$INCIDENT_DATE_TIME)
+fi_df$ARRIVAL_DATE_TIME = as.character(fi_df$ARRIVAL_DATE_TIME)
+fi_df$INCIDENT_DATE_TIME=substring(fi_df$INCIDENT_DATE_TIME,1,16)
+fi_df$ARRIVAL_DATE_TIME=substring(fi_df$ARRIVAL_DATE_TIME,1,16)
+
+fi_df$INCIDENT_DATE_TIME = as.datetime(fi_df$INCIDENT_DATE_TIME,format='%m/%d/%Y %H:%M')
+fi_df$ARRIVAL_DATE_TIME = as.datetime(fi_df$ARRIVAL_DATE_TIME,format='%m/%d/%Y %H:%M')
+
+fi_df$Time_diff = fi_df$ARRIVAL_DATE_TIME-fi_df$INCIDENT_DATE_TIME
+fi_df$Time_diff = fi_df$Time_diff/60
+fi_df$incident_occured = fires$INCIDENT_DATE_TIME
+fi_df$unit_arrival = fires$ARRIVAL_DATE_TIME
+
+fi_df = fi_df[complete.cases(fi_df),]
+}
+
+
+for(i in 1:nrow(fi_df)){
+  #print (fi_df[i,"Time_diff"])
+  if(fi_df[i,"Time_diff"]<0){
+    fi_df[i,"Time_diff"]=720+fi_df[i,"Time_diff"]
+  }
+  else if (fi_df[i,"Time_diff"]>1440) {
+    fi_df[i,"Time_diff"] = fi_df[i,"Time_diff"] - 1440
+  }
+}
+
+#print (nrow(fi_df))
+full_details_fi_df = fi_df[complete.cases(fi_df),]
+#print (nrow(full_details_fi_df))
+
+f_connect <- f
+fi_df_dup <- fi_df[complete.cases(fi_df),]
+for(i in 1:nrow(fi_df_dup)){
+  f_connect = addPolylines(f_connect,lat = as.numeric(fi_df_dup[i,c(2,9)]),lng = as.numeric(fi_df_dup[i,c(1,8)]),group = "baselayer")
+}
+
+f_connect   %>%
+  addCircles(data = firestations,color = 'Red',group = "Fire Stations", popup = addn_content_fire_stations,weight=10) %>% 
+  
+  addLayersControl(baseGroups = c("baselayer"), overlayGroups = c("Fire Stations"))
+
+
+```
+    
+  
+The following scatterplots show the mean_response time vs distance to the nearest firestation categorized first by Borough and then by Incident_property_type.  
+  
+  
+```{r fig.width=10,fig.height=6}
+
+#text=paste("Borough: ",fi_df$fires.BOROUGH_DESC)
+interactive3 = ggplot(full_details_fi_df,aes(x=Time_diff,y=Distance_miles_1,color=Borough_Desc))+geom_point(alpha=0.5,size=2.5)+xlab("Time (in minutes)")+ ylab("Distance(in miles)")+ggtitle("Distance from FireStation for the Incident Location v/s Time required to reach the location") + xlim(0,20) + ylim(0,20) + theme_minimal()
+ggplotly(interactive3)
+```
+  
+Some of the outliers in terms of distance to nearest firestation vs time required to reach the incident correspond to incident type as Hazmat detection and some of them are located at subcellar level.    
+  
+```{r fig.width=8,fig.height=6}
+interactive4 = ggplot(full_details_fi_df,aes(x=full_details_fi_df$Time_diff,y=full_details_fi_df$Distance_miles_1,color=full_details_fi_df$fccsel1))+geom_point(alpha=0.5,size=2.5)+xlab("Time (in minutes)")+ ylab("Distance(in miles)")+ggtitle("Distance from FireStation for the Incident Location v/s Time required to reach the location") + xlim(0,20) + ylim(0,20) + theme_minimal()
+
+ggplotly(interactive4)
+
+```
+
+  
+## B)
+  
+The following visualization maps the response times across all the boroughs, which informs the reader about the effective response times of the Fire Department.  
+  
+```{r fig.width=8,fig.height=6}
+
+fi_df$Time_diff = as.numeric(fi_df$Time_diff)
+rt = fi_df$Time_diff
+fi_res = NA
+fi_res = ifelse(rt<=5,"0-5",fi_res)
+fi_res = ifelse(rt>5,"6-10",fi_res)
+fi_res = ifelse(rt>10,"11-15",fi_res)
+fi_res = ifelse(rt>15,"16-20",fi_res)
+fi_res = ifelse(rt>20,">20",fi_res)
+
+fi_df$response_category = fi_res
+
+pal = colorFactor("Set1", domain = fi_df$response_category) # Grab a palette
+color_time1 = pal(fi_df$response_category)
+responses <- paste("Incident:",fires$INCIDENT_TYPE_DESC,"<br/>",
+                   "Property Type:",fires$PROPERTY_USE_DESC,"<br/>",
+                   "Borough:",fi_df$fires.BOROUGH_DESC,"<br/>",
+                   "Distance from nearest firestation:",fi_df$Distance_miles,"<br/>")
+response_times = f_3a %>% 
+  
+  addCircles(data = fi_df,lng = fi_df$Longitude,lat = fi_df$Latitude, color = color_time1,popup =   responses) %>%
+  addLegend(pal = pal, values = fi_df$response_category, title = "Response Time (minutes)",position = "topleft")
+
+response_times
+```
+  
+
+As seen from the following visualizations, the mean time to respond is highest for Staten Island and lowest for Brooklyn.  
+The mean distance from nearest firestation is largest in case of Staten Island while smallest in case of Manhattan. Also residential places were quickest to reach in terms of average time taken to reach incident location.   
+  
+  
+```{r fig.width=8,fig.height=6}
+
+mean_time_to_reach = aggregate(full_details_fi_df$Time_diff,list(full_details_fi_df$Borough_Desc),FUN="mean")
+colnames(mean_time_to_reach) = c("Borough","Mean_Time_to_reach")
+
+mean_time_to_reach_property = aggregate(full_details_fi_df$Time_diff,list(full_details_fi_df$fccsel1),FUN="mean")
+colnames(mean_time_to_reach_property) = c("Property_Type","Mean_Time_to_reach")
+
+mean_distance_from_Nearest_FS = aggregate(full_details_fi_df$Distance_miles_1,list(full_details_fi_df$Borough_Desc),FUN="mean")
+colnames(mean_distance_from_Nearest_FS) = c("Borough","Mean_dist_from_Nearest_FS")
+
+time_plot = ggplot(mean_time_to_reach,aes(y=mean_time_to_reach$Mean_Time_to_reach,x=reorder(mean_time_to_reach$Borough,mean_time_to_reach$Mean_Time_to_reach)))+coord_flip()+geom_bar(stat="identity",width = 0.5)+ggtitle("Mean Time to reach Incident Location")+ylab("Time")+xlab("Borough")+theme_minimal()
+time_plot
+
+time_plot_1 = ggplot(mean_time_to_reach_property,aes(y=Mean_Time_to_reach,x=reorder(Property_Type,Mean_Time_to_reach)))+coord_flip()+geom_bar(stat="identity",width = 0.5)+ggtitle("Mean Time to reach Incident Location")+ylab("Time")+xlab("Property Type")+theme_minimal()
+time_plot_1
+
+dist_plot = ggplot(mean_distance_from_Nearest_FS,aes(y=Mean_dist_from_Nearest_FS,x=reorder(Borough,Mean_dist_from_Nearest_FS)))+coord_flip()+geom_bar(stat="identity",width = 0.5)+ggtitle("Average distance to nearest fire station")+ylab("Distance")+xlab("Borough")+theme_minimal()
+dist_plot
+
+```
