@@ -1,0 +1,475 @@
+---
+title: "Assignment 3"
+author: "Anand Bhave"
+date: "2 April 2018"
+output: 
+  html_document:
+    keep_md: true
+
+---
+
+```{r setup, include=FALSE}
+#knitr::opts_chunk$set(echo = FALSE)
+library(knitr)
+opts_chunk$set(fig.path="images/",
+               cache.path="cache/",
+               cache=FALSE,
+               echo=TRUE,
+               message=FALSE,
+               warning=FALSE) 
+```
+
+```{r fig.width=8,fig.height=6}
+library(dplyr)
+library(ggthemes)
+library(ggplot2)
+library(plotly)
+library(DT)
+library(qdap)
+library(tm)
+library(SnowballC)
+library(plotrix)
+library(wordcloud)
+library(leaflet)
+library(tidytext)
+library(quanteda)
+library(maps)
+library(geojsonio)
+library(ggmap)
+fund = read.csv("kickstarter_projects.csv")
+```
+  
+##Q1) A) Success By Category
+
+The following code and plots try to visually summarize the categories which were most successful with respect to the mean achievement ratio and mean backers count.  
+Games, Design, Technology, Comics and Publishing occupy the top slots with respect to the mean backers count while Games, Comics, Crafts, Technology and Publishing occupy the top slots with respect to mean achievement ratio.  
+  
+```{r fig.width=8,fig.height=6}
+fund$achievement_ratio <- (fund$pledged/fund$goal)*100
+full_fund = fund[complete.cases(fund),]
+category_ar = aggregate(full_fund$achievement_ratio,list(full_fund$top_category),FUN="mean")
+category_backer = aggregate(full_fund$backers_count,list(full_fund$top_category),FUN="mean")
+colnames(category_ar) = c("category","mean_achievement_ratio")
+colnames(category_backer) = c("category","mean_backer_count")
+
+category_ar = merge(category_ar,category_backer,by = "category")
+
+ar_plot = ggplot(category_ar,aes(x=reorder(category,mean_achievement_ratio),y=mean_achievement_ratio))+coord_flip()+geom_bar(stat="identity",width = 0.5)+ggtitle("Top Categories wrt mean acheivement ratio")+ylab("Mean Achievement Ratio")+xlab("Category")+theme_minimal()
+ar_plot
+
+backer_plot = ggplot(category_ar,aes(x=reorder(category,mean_backer_count),y=mean_backer_count))+coord_flip()+geom_bar(stat="identity",width = 0.5)+ggtitle("Top Categories wrt mean backer count")+ylab("Mean Backer Count")+xlab("Category")+theme_minimal()
+backer_plot
+```
+  
+  
+##Q1) B) Success by Location
+
+The following code and visualization try to drive the concept of success measured by the origin or location of the Kickstarter project. The cities which occupy the top slots include Bellevue, Venice, Rhinelander, Marina del Rey, Santa Clara, etc. The states which are occupy the top slots in terms of the number of successful projects include California, New York, Texas, Illios, Washington, etc.  The following leaflet comprising of overlay groups drive in the same concept through an enriching visual summary.  
+  
+  
+```{r fig.width=8,fig.height=6}
+success_states = subset(full_fund,full_fund$state=="successful")
+states_gp = group_by(success_states,location_state)
+states_summ = summarize(states_gp,count=n())
+colnames(states_summ) = c("State","Count")
+
+cities = aggregate(success_states$achievement_ratio,list(success_states$location_town),FUN="mean")
+cities = cities[order(-cities$x),]
+cities = cities[1:50,]
+colnames(cities) = c("City","AR")
+
+states_summ$State = state.name[match(states_summ$State,state.abb)]
+states_summ = states_summ[complete.cases(states_summ),]
+
+states_summ$longitude=NA
+states_summ$latitude=NA
+
+cities$longitude=NA
+cities$latitude=NA
+
+
+
+while((any(is.na(states_summ)))){
+for(i in 1:nrow(states_summ)){
+  if(is.na(states_summ[i,"longitude"])){
+  Sys.sleep(2)
+  result <- geocode(location = as.character(paste(states_summ[i,"State"],", USA")), output = "latlon", source = "google")
+  states_summ[i,"longitude"] = result[1]
+  states_summ[i,"latitude"] = result[2]
+  }
+}
+  Sys.sleep(2)
+}
+
+while((any(is.na(cities)))){
+for(i in 1:nrow(cities)){
+  if(is.na(cities[i,"longitude"])){
+  Sys.sleep(2)
+  result <- geocode(location = as.character(paste(cities[i,"City"],", USA")), output = "latlon", source = "google")
+  cities[i,"longitude"] = result[1]
+  cities[i,"latitude"] = result[2]
+  }
+}
+  Sys.sleep(2)
+}
+
+
+mapStates = map("state", fill = TRUE, plot = FALSE)
+f_3a_addn = leaflet(mapStates) %>% setView(-96, 37.8, 4) %>% addTiles() %>%
+  
+  addCircles(data = states_summ,color="blue",radius=as.numeric(states_summ$Count)*10,popup = states_summ$State,group = "States")
+  
+  f_3a_addn<- f_3a_addn %>% addCircles(data = cities,color = 'Red',popup = cities$City,radius = as.numeric((cities$AR)),group = "Cities") %>% 
+  
+  addLayersControl(overlayGroups = c("States", "Cities")) 
+f_3a_addn
+```
+  
+  
+##Q2) A) Success Story: WordCloud
+
+The input text or "blurb" had to pre-processed before any analysis could be performed on them. So following the standard operations of text pre-processing like removing whitespaces, numbers, punctuation were performed in addition to stemming and completing the stemmed document.  
+One additional and important task that was performed was pertaining to removing the name of the kickstarter project from the blurb or summary of the project, since I want to identify the terms that really allow a project to stand out.  This was done by a combination of strsplit,  unlist and removeWords operation, more information about which can be found on lines ~151-160.  
+Once the text processing was accomplished, the dataset was then converted to corpus and then subsequently to document-term-matrix and term-document-matrix and then to tidy format for further processing. The following wordcloud displays the most frequently occuring words based on their term frequency.  
+  
+  
+```{r fig.width=8,fig.height=6}
+
+sorted_funds = full_fund[order(-full_fund$achievement_ratio),]
+
+top_ideas_ar = head(sorted_funds,1000)
+bottom_ideas_ar = tail(sorted_funds,1000)
+
+top_summary = as.data.frame(gsub("[[:punct:] ]+"," ",top_ideas_ar$blurb))
+colnames(top_summary) = c("blurb")
+
+bt_summary = as.data.frame(gsub("[[:punct:] ]+"," ",bottom_ideas_ar$blurb))
+colnames(bt_summary) = c("blurb")
+
+top_names = as.data.frame(gsub("[[:punct:] ]+"," ",top_ideas_ar$name))
+colnames(top_names) = c("name")
+
+bt_names = as.data.frame(gsub("[[:punct:] ]+"," ",bottom_ideas_ar$name))
+colnames(bt_names) = c("name")
+
+
+remove_titles <- function(summary,title){
+   title_split = unlist(strsplit(as.character(title)," "))
+   clean_titles = removeWords(as.character(summary),title_split)
+   return(clean_titles)
+}
+
+top_sum = c()
+bt_sum = c()
+
+for(i in 1:nrow(top_summary)){
+  #print(i)
+  top_sum=c(top_sum,remove_titles(top_summary[i,"blurb"],top_names[i,"name"]))
+  #print(top_summary[i,"blurb"])
+  #print(remove_titles(top_summary[i,"blurb"],top_names[i,"name"]))
+  bt_sum = c(bt_sum,remove_titles(bt_summary[i,"blurb"],bt_names[i,"name"]))
+}
+
+clean_top = as.data.frame(top_sum)
+colnames(clean_top) = c("blurb")
+clean_bt = as.data.frame(bt_sum)
+colnames(clean_bt) = c("blurb")
+
+clean_top$blurb=as.character(clean_top$blurb)
+clean_bt$blurb=as.character(clean_bt$blurb)
+clean_top$doc_id = 1:1000
+clean_bt$doc_id = 1:1000
+
+clean_top = clean_top[,c(2,1)]
+clean_bt = clean_bt[,c(2,1)]
+
+colnames(clean_top) = c("doc_id","text")
+colnames(clean_bt) = c("doc_id","text")
+
+top_source = DataframeSource(clean_top)
+bt_source = DataframeSource(clean_bt)
+
+top_corpus = VCorpus(top_source)
+bt_corpus = VCorpus(bt_source)
+
+
+clean_corpus <- function(corpus){
+# corpus <- tm_map(corpus, removePunctuation)
+  corpus <- tm_map(corpus, content_transformer(tolower))
+  corpus <- tm_map(corpus, removeWords, c(stopwords("en")))
+  corpus <- tm_map(corpus, removeNumbers)
+  corpus <- tm_map(corpus, stripWhitespace)
+  return(corpus)
+}
+
+tc_clean = clean_corpus(top_corpus)
+bc_clean = clean_corpus(bt_corpus)
+
+tc_stemmed <- tm_map(tc_clean, stemDocument)
+bc_stemmed <- tm_map(bc_clean, stemDocument)
+
+stemCompletion2 <- function(x, dictionary) {
+   x <- unlist(strsplit(as.character(x), " "))
+   x <- x[x != ""]
+   x <- stemCompletion(x, dictionary=dictionary)
+   x <- paste(x, sep="", collapse=" ")
+   PlainTextDocument(stripWhitespace(x))
+}
+
+tc_comp <- lapply(tc_stemmed, stemCompletion2, dictionary=tc_clean)
+bc_comp <- lapply(bc_stemmed, stemCompletion2, dictionary=bc_clean)
+
+tc_comp = as.VCorpus(tc_comp)
+bc_comp = as.VCorpus(bc_comp)
+
+tc_dtm = DocumentTermMatrix(tc_comp)
+bc_dtm = DocumentTermMatrix(bc_comp)
+
+tc_m = as.matrix(tc_dtm)
+#top_m <- as.matrix(top_dtm)
+
+tc_dt <- tidy(tc_dtm)
+bc_dt <- tidy(bc_dtm)
+
+tc_tf_idf <-  tc_dt %>%
+                bind_tf_idf(term, document, count) %>%  
+                arrange(desc(tf_idf)) 
+
+bc_tf_idf <-  bc_dt %>%
+                bind_tf_idf(term, document, count) %>%  
+                arrange(desc(tf_idf))
+
+
+set.seed(2103)
+
+wordcloud(tc_tf_idf$term, tc_tf_idf$tf, max.words = 100, colors = "red")
+
+tc_dt_top_words = tc_dt %>%     group_by(term) %>%
+                 summarise(n = sum(count))
+
+bc_dt_top_words = bc_dt %>%     group_by(term) %>%
+                 summarise(n = sum(count))
+
+colnames(tc_dt_top_words) = c("term","top_counts")
+colnames(bc_dt_top_words) = c("term","bottom_counts")
+
+combined_words = merge(tc_dt_top_words,bc_dt_top_words,by = "term")
+
+difference <- abs(combined_words[, 2] - combined_words[, 3])
+
+combined_words <- cbind(combined_words, difference)
+
+combined_words <- combined_words[order(combined_words[, 4], decreasing = TRUE), ]
+
+
+top25_df <- data.frame(x = combined_words[1:25, 2], 
+                       y = combined_words[1:25, 3], 
+                       labels = combined_words[1:25,1 ])
+
+```
+    
+  
+##Q2) B)
+The following pyramid plot shows how the words between successful and unsuccessful projects differ in frequency.  
+  
+
+```{r fig.width=8,fig.height=6}
+
+# Create the pyramid plot
+p <- pyramid.plot(top25_df$x, top25_df$y, labels = top25_df$labels, 
+             gap = 10, top.labels = c("Successful Projects", " ", "Unsuccessful Projects"), 
+             main = "Words in Common", laxlab = NULL, 
+             raxlab = NULL, unit = NULL, labelcex=0.5)
+
+```
+  
+  
+##Q2) C)  
+The following visualization shows the relationship between the readability measure and one of the measures of success: backers  count. The FRE score of most of the kickstarter project lie in vicinity of each other with some outliers in the scatterplot.  
+   
+
+```{r fig.width=8,fig.height=6}
+
+require(quanteda)
+require(dplyr)
+
+sample_df = subset(full_fund,select = c("blurb"))
+sample_df$doc_id= 1:148163
+sample_df=  sample_df[,c(2,1)]
+colnames(sample_df) = c("doc_id","text")
+
+sample_ds = DataframeSource(sample_df)
+sample_corps = Corpus(sample_ds)
+
+qcorpus = corpus(sample_corps)
+
+FRE_corps <- textstat_readability(qcorpus,
+              measure=c('Flesch.Kincaid'))
+
+
+sample_df2 = subset(full_fund,select = c("backers_count"))
+sample_df2$doc_id= 1:148163
+
+fre_score = FRE_corps
+
+colnames(fre_score) = c("doc_id","FRE Score")
+fre_score$doc_id = gsub("text","",fre_score$doc_id)
+fre_score$doc_id = as.numeric(fre_score$doc_id)
+
+merged_fre = merge(sample_df2,fre_score,by = "doc_id")
+
+interactive = ggplot(merged_fre,aes(x=log10(merged_fre$backers_count),y=merged_fre$`FRE Score`))+geom_point(alpha=0.5,size=2.5)+xlab("Log of Backers Count")+  ylab("FRE Score")+ggtitle("Comparative Study of Project Success with FRE Score")+ theme_minimal()
+interactive
+
+```
+  
+  
+##Q3) A) 
+  
+The following visualization explains the relationship between the polarity of the text blurb and the measure of success: first with backers_count and then with achievement ratio. One important observation which can be drawn from both these scatterplots is that, blurbs having postive polarity tend to achieve more backers as well as their chance to convert and achieve the goal significantly increases. Ths staying postive really matters for the projects on Kickstarter.  
+  
+
+```{r fig.width=8,fig.height=6,echo=FALSE}
+pos <- read.table("dictionaries/positive-words.txt", as.is=T)
+neg <- read.table("dictionaries/negative-words.txt", as.is=T)
+
+sentiment <- function(words){
+  require(quanteda)
+  tok <- quanteda::tokens(words)
+  pos.count <- sum(tok[[1]]%in%pos[,1])
+  #cat("\n positive words:",tok[[1]][which(tok[[1]]%in%pos[,1])],"\n")
+  neg.count <- sum(tok[[1]]%in%neg[,1])
+  #cat("\n negative words:",tok[[1]][which(tok[[1]]%in%neg[,1])],"\n")
+  out <- (pos.count - neg.count)/(pos.count+neg.count)
+  #cat("\n Tone of Document:",out)
+  return(out)
+}
+
+#for(i in 1:nrow(clean_top)){
+#  clean_top[i,"sentiment_rating"] = sentiment(clean_top[i,"text"])
+#  clean_bt[i,"sentiment_rating"] = sentiment(clean_bt[i,"text"])
+#}
+
+#Commented Out as time consuming, have run the loop and stored the sentiment in projects_update.csv
+
+#for(i in 1:nrow(sorted_funds)){
+#  sorted_funds[i,"sentiment_rating"] = sentiment(gsub("[[:punct:]]"," ", #as.character(sorted_funds[i,"blurb"])))
+#}
+#sorted_subset = subset(sorted_funds,select = c("backers_count","blurb","top_category","achievement_ratio","sentiment_rating"))
+
+#write.csv(sorted_subset,"projects_updated.csv")
+
+project_update = read.csv("projects_updated.csv")
+project_update = project_update[!is.na(project_update$sentiment_rating),]
+
+sentiment_plot = ggplot(project_update,aes(x=project_update$sentiment_rating,y=project_update$backers_count))+geom_point(alpha=0.5,size=2.5)+xlab("Sentiment Rating")+  ylab("Backers Count")+ggtitle("Comparative Study of Project Success with Sentiment Score")+ theme_minimal()
+sentiment_plot
+
+sentiment_plot2 = ggplot(project_update,aes(x=project_update$sentiment_rating,y=project_update$achievement_ratio))+geom_point(alpha=0.5,size=2.5)+xlab("Sentiment Rating")+  ylab("Achievement Ratio")+ggtitle("Comparative Study of Project Success with Sentiment Score")+ theme_minimal()
+sentiment_plot2
+
+#top_ideas_ar$doc_id = 1:1000
+#bottom_ideas_ar$doc_id = 1:1000
+
+#top_ideas_ar=merge(top_ideas_ar,clean_top,by = "doc_id")
+#bottom_ideas_ar=merge(bottom_ideas_ar,clean_bt,by = "doc_id")
+
+#tb_combine = rbind(top_ideas_ar,bottom_ideas_ar)
+#tb_combine = tb_combine[tb_combine$sentiment_rating!="NaN",]
+
+
+```
+  
+  
+##Q3) B)
+  
+The successful and unsuccessful projects were segregated and combined based on their polarity (positive or negative). The following visualization tries to convey comparison between the most frequently used positive (expresses through wordcloud in blue text) and negative words (expresses through wordcloud in red text) through the use of wordclouds. 
+  
+  
+```{r fig.width=8,fig.height=6,echo=FALSE}
+
+project_update = project_update[,c(1,3,2,4,5,6)]
+colnames(project_update) = c("doc_id","text","backers_count","top_category","achievement_ratio","sentiment_rating")
+
+
+top_proj_senti = head(project_update,1000)
+bt_proj_senti = tail(project_update,1000)
+
+top_pos = subset(top_proj_senti,top_proj_senti$sentiment_rating>0)
+top_neg = subset(top_proj_senti,top_proj_senti$sentiment_rating<=0)
+
+bt_pos = subset(bt_proj_senti,bt_proj_senti$sentiment_rating>0)
+bt_neg = subset(bt_proj_senti,bt_proj_senti$sentiment_rating<=0)
+
+pos_2000 = rbind(top_pos,bt_pos)
+neg_2000 = rbind(top_neg,bt_neg)
+
+pos_2000$doc_id=1
+neg_2000$doc_id=2
+
+pos_2000$text=  gsub("[[:punct:] ]+"," ",pos_2000$text)
+pos_2000_corpus = VCorpus(DataframeSource(pos_2000))
+pos_clean = clean_corpus(pos_2000_corpus)
+pos_stemmed <- tm_map(pos_clean, stemDocument)
+pos_comp <- lapply(pos_stemmed, stemCompletion2, dictionary=pos_clean)
+pos_comp = as.VCorpus(pos_comp)
+pos_2000_tdm = TermDocumentMatrix(pos_comp)
+pos_tidy = tidy(pos_2000_tdm)
+
+neg_2000$text=  gsub("[[:punct:] ]+"," ",neg_2000$text)
+neg_2000_corpus = VCorpus(DataframeSource(neg_2000))
+neg_clean = clean_corpus(neg_2000_corpus)
+neg_stemmed <- tm_map(bc_clean, stemDocument)
+neg_comp <- lapply(neg_stemmed, stemCompletion2, dictionary=neg_clean)
+neg_comp = as.VCorpus(neg_comp)
+neg_2000_tdm = TermDocumentMatrix(neg_comp)
+neg_tidy = tidy(neg_2000_tdm)
+#total_2000_asm = as.matrix(total_2000_tdm)
+
+pos_tf_idf <-  pos_tidy %>%
+                bind_tf_idf(term, document, count) %>%  
+                arrange(desc(tf_idf)) 
+
+neg_tf_idf <-  neg_tidy %>%
+                bind_tf_idf(term, document, count) %>%  
+                arrange(desc(tf_idf)) 
+
+wordcloud(pos_tf_idf$term, pos_tf_idf$tf, max.words = 100, colors = "blue")
+wordcloud(neg_tf_idf$term, neg_tf_idf$tf, max.words = 100, colors = "red")
+
+nrc <- get_sentiments("nrc")
+colnames(nrc) = c("term","sentiment")
+
+successful_words_nrc = tc_dt %>% group_by(term) %>%
+                 summarise(n = sum(count)) %>% inner_join(nrc)
+
+nt_success_words_nrc = bc_dt %>% group_by(term) %>%
+                 summarise(n = sum(count)) %>% inner_join(nrc)
+
+successful_gp = group_by(successful_words_nrc,sentiment)
+successful_summ = summarise(successful_gp,count=n())
+
+unsuccessful_gp = group_by(nt_success_words_nrc,sentiment)
+unsuccessful_summ = summarise(unsuccessful_gp,count=n())
+
+nrc_comb = merge(successful_summ,unsuccessful_summ,by="sentiment")
+
+nrc_df <- data.frame(x = nrc_comb[, 2], 
+                       y = nrc_comb[, 3], 
+                       labels = nrc_comb[,1])
+
+```
+  
+  
+##Q3) C)
+  
+The following script uses the NRC Word-Emotion Association Lexicon to calculate the prevalance of emotions across the sucessful and unsuccessful projects. While some of the emotions occur selectively only in a single category, there are some emotions which occur in both the domains for roughly the same proportion. Even if this is the case, a closer inspection is required to really understand the context of the emotion occuring in the text (semantic meaning) apart from the syntactic meaning.  
+  
+
+
+```{r fig.width=8,fig.height=6,echo=FALSE}
+p <- pyramid.plot(nrc_df$x, nrc_df$y, labels = nrc_df$labels, 
+             gap = 20, top.labels = c("Successful Projects", " ", "Unsuccessful Projects"), 
+             main = "Words in Common", laxlab = NULL, 
+             raxlab = NULL, unit = NULL, labelcex=0.5)
+```

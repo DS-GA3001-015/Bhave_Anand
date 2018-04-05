@@ -3,3 +3,5 @@ hw02/**/*.csv
 hw02/**/*.xlsx
 hw02/**/*.xls
 hw02/**/*.geojson
+hw03/**/kickstarter_projects.csv
+hw03/**/funds_update.csv
