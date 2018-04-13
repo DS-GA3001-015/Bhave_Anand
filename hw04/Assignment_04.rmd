@@ -1,0 +1,358 @@
+---
+title: "Assignment_04"
+author: "Anand Bhave"
+date: "9 April 2018"
+output: 
+  html_document:
+    keep_md: true
+---
+
+```{r setup, include=FALSE}
+#knitr::opts_chunk$set(echo = FALSE)
+library(knitr)
+opts_chunk$set(fig.path="images/",
+               cache.path="cache/",
+               cache=FALSE,
+               echo=TRUE,
+               message=FALSE,
+               warning=FALSE) 
+```
+  
+  
+##Q1) A) Network of Followers  
+The following network graph and data-tables provide an informative visual summary about the twitter activity of Senators in terms of their follower and following count and an inter-connected network in terms of followers/following activity categorized by party affiliation. The data-tables provide information about the top senators in terms of their following count and followers count.  
+  
+  
+```{r fig.width=10,fig.height=10}
+library(dplyr)
+library(ggthemes)
+library(ggplot2)
+library(igraph)
+library(tibble)
+library(ggnet)
+library(plotly)
+library(network)
+library(DT)
+library(wordcloud)
+
+senator_list <- read.csv("senators_follow.csv") 
+senator_party <- read.csv("senators_twitter.csv")
+
+following_subset = subset(senator_list,following==TRUE)
+
+senator_following_gp = group_by(following_subset,source)
+senator_following = summarise(senator_following_gp,following_count=n())
+
+senator_followers_gp = group_by(following_subset, target)
+senator_followers = summarise(senator_followers_gp,followers_count=n())
+
+follow_graph = graph_from_data_frame(following_subset,directed = TRUE)
+
+indegree = igraph::degree(graph = follow_graph,v=V(follow_graph),mode="in")
+indegree_df = as.data.frame(indegree)
+
+outdegree = igraph::degree(graph = follow_graph,mode="out")
+outdegree_df = as.data.frame(outdegree)
+
+follow_sbs = subset(following_subset,select=c(1,2))
+follow_nw = network(follow_sbs,directed = TRUE)
+names = data.frame(Twitter_Handle = network.vertex.names(follow_nw))
+names$importance_category<-NA
+
+colnames(senator_party)[3] = c("Twitter_Handle")
+colnames(senator_followers)[1] = c("Twitter_Handle")
+names = merge(names, senator_party, by = "Twitter_Handle", sort = FALSE) 
+names = merge(names,senator_followers,by="Twitter_Handle", sort = FALSE)
+
+for(i in 1:nrow(names)){
+  if(names[i,"followers_count"]<=15)
+    names[i,"importance_category"] = 1
+  else if(names[i,"followers_count"]<=30)
+    names[i,"importance_category"] = 2
+  else if(names[i,"followers_count"]<=45)
+    names[i,"importance_category"] = 3
+  else if(names[i,"followers_count"]<=60)
+    names[i,"importance_category"] = 4
+  else
+    names[i,"importance_category"] = 5
+}
+
+follow_nw %v% "party" = as.character(names$Party.affiliation)
+follow_nw %v% "importance" = as.numeric(names$importance_category)
+senator_followers = senator_followers[order(-senator_followers$followers_count),]
+senator_following = senator_following[order(-senator_following$following_count),]
+
+y = c("blue","yellow","red")
+names(y) = levels(names$Party.affiliation)
+
+
+ggnet2(follow_nw, color = "party",palette = y,alpha = 0.75, size = "importance", edge.alpha = 0.5)
+
+datatable(senator_followers[,1],caption = "Top Senators having the most followers amongst senators")
+datatable(senator_following[,1],caption = "Top Senators following most of their contemporaries")
+
+
+```
+  
+  
+##Q1) B) Communities  
+The following datatable shows that party identification can be recovered by an automated mechanism of cluster identification using cluster walktraps. The 'members' column of the datatable provides the auto-generated cluster-id (out of 1,2,3) for each senator in the list. The party affiliation gives us information about a senator's affiliation.  Thus from the datatable, we can see that that members to party_affiliation is a one-to-one relationship.  
+  
+    
+```{r fig.width=8,fig.height=6}
+wc <- cluster_walktrap(follow_graph)
+members <- membership(wc)
+members_df <- cbind(V(follow_graph)$name,members)
+members_df <- as.data.frame(members_df)
+colnames(members_df)[1]=c("Twitter_Handle")
+names_subset = names[,c(1,7)]
+members = merge(members_df,names_subset,by="Twitter_Handle")
+
+datatable(members,caption = "Connection between party affiliation and community detection using cluster walktrap")
+```
+  
+  
+##Q2) A) Most Common Topics Over Time  
+The following plot provides an user, an insight into the most common topics over time. The visualization provides an interactive insight into the topics(hashtags) that were most discussed for each month over the years. Any value on x-axis corresponds to a specific month in the timeline and y-axis corresponds to the frequency of the most discussed hashtag for that particular month.
+  
+  
+
+  
+```{r fig.width=8,fig.height=6}
+senator_tweets <- readRDS("senator_tweets.RDS")
+senator_tweets_org = subset(senator_tweets,is_retweet==FALSE)
+tags = subset(senator_tweets_org,!is.na(hashtags))
+
+party_list = subset(senator_party,select=c(3,6))
+tags_subset = subset(tags,select=c(2,4,14))
+
+tags_subset = merge(tags_subset,party_list,by.x="screen_name",by.y="Twitter_Handle")
+date_substr = substring(as.character(tags_subset$created_at),1,7)
+date_year = substring(as.character(tags_subset$created_at),1,4)
+
+
+temp_tags = c()
+temp_date_2 = c()
+temp_date = c()
+temp_party = c()
+
+for(i in 1:nrow(tags_subset)){
+  tdate = date_year[i]
+  tparty = tags_subset[i,"Party.affiliation"]
+  tdate_month = date_substr[i]
+  ul = tolower(unlist(tags_subset[i,"hashtags"]))
+  for(j in ul){
+    temp_date = c(temp_date,tdate_month)
+    temp_date_2 = c(temp_date_2,tdate)
+    temp_tags = c(temp_tags,j)
+    temp_party = c(temp_party,tparty)
+  }
+}
+
+temp_tags_df = data.frame(temp_date,temp_date_2,temp_tags,temp_party)
+
+# temp_tags = c()
+# temp_date = c()
+# date_substr = substring(as.character(tags$created_at),1,7)
+# for(i in 1:nrow(tags)){
+#   tdate = date_substr[i]
+#   ul = tolower(unlist(tags[i,"hashtags"]))
+#   for(j in ul){
+#     temp_date = c(temp_date,tdate)
+#     temp_tags = c(temp_tags,j)
+#   }
+# }
+# temp_tags_df = data.frame(temp_date,temp_tags)
+
+temp_tags_gp = group_by(temp_tags_df,temp_tags_df$temp_date,temp_tags_df$temp_tags)
+temp_tags_summ = summarise(temp_tags_gp,count=n())
+colnames(temp_tags_summ) = c("temp_date","temp_tags","count")
+
+frequent_terms = aggregate(temp_tags_summ$count, by = list(temp_tags_summ$temp_date), max)
+colnames(frequent_terms) = c("temp_date","count")
+
+frequent_terms = merge(frequent_terms,temp_tags_summ,by=c("temp_date","count"))
+frequent_terms = subset(frequent_terms,!duplicated(frequent_terms[,1]))
+
+ggplotly(ggplot(data=frequent_terms, aes(x=frequent_terms$temp_date, y=frequent_terms$count,label=frequent_terms$temp_tags)) +
+  geom_line(lwd=0.8)+geom_point()+theme(axis.text.x=element_text(angle=90,hjust=1))+scale_x_discrete(breaks = levels(frequent_terms$temp_date)[seq(1,110,by=8)])+xlab("Date")+ylab("Frequency")+ggtitle("Popular Hashtags Over the Years"))
+
+```
+  
+  
+##Q2) B) Democrats v/s Republicans  
+The following visualizations show how conversations are driven for an individual based on his political affiliation. The first wordcloud shows the topics (through the use of HashTags) most discussed by Democrats and the second wordcloud shows the topics most discussed by Republicans.  
+An important insight that can be drawn from the visualization and the corresponding data-table is the following, keeping the opposition party in check by frequently mentioning or criticizing the policies of the opposite party.  
+For example, among the topics most discussed by Democrats, TrumpCare, goptaxscam, healthcare and daca figure at the top of the list, while similarly for republicans, the most discussed topics include ObamaCare, taxreform, brokenpromises, veterans and taxcutandjobsact, etc.  
+So in general we can see twitter being used to critize the opposite party while promoting the schemes for his/her affiliated party.  
+  
+  
+```{r fig.width=8,fig.height=6}
+party_col = data.frame(c(1,2,3),c("Democratic","Independent","Republicans"))
+colnames(party_col) = c("Party_Id","Party_Name")
+temp_tags_df = merge(temp_tags_df,party_col,by.x="temp_party",by.y="Party_Id")
+
+temp_tags_gp1 = group_by(temp_tags_df,temp_tags_df$temp_date_2,temp_tags_df$Party_Name,temp_tags_df$temp_tags)
+temp_tags_summ1 = summarise(temp_tags_gp1,count=n())
+temp_tags_summ1 = temp_tags_summ1[order(-temp_tags_summ1$count),]
+colnames(temp_tags_summ1) = c("year","party_name","hashtags","count")
+```
+
+```{r fig.width=8,fig.height=6}
+wc_gp = group_by(temp_tags_summ1,party_name,hashtags)
+wc_sum = summarise(wc_gp,count_total=sum(count))
+
+democrat = subset(wc_sum,party_name=="Democratic")
+repub = subset(wc_sum,party_name=="Republicans")
+
+```
+  
+The first wordcloud shows the topics (through the use of HashTags) most discussed by Democrats and the second wordcloud shows the topics most discussed by Republicans. 
+  
+  
+```{r fig.width=8,fig.height=6}
+wordcloud(words = democrat$hashtags,freq = democrat$count_total,max.words = 100)
+wordcloud(words = repub$hashtags,freq = repub$count_total,max.words = 100)
+
+datatable(temp_tags_summ1[1:100,],caption = "Some Important issues as reflected through #Hashtags for senators with respect to party Affiliation")
+
+```
+
+  
+##Q2) C) Gun Control I - Dems vs. Reps  
+The following datatable gives us an insight into the discussions taking place on twitter for members of both Democratic and Republican Party.  
+gunviolence, gunreform, etc figure among the popular hashtags for Democrats while 2ndamendment, guncontrol figure among the popular hashtags for Republicans.  
+  
+  
+```{r fig.width=8,fig.height=6}
+gun_hashtags = c( "NeverAgain", "guncontrol", "guncontrolnow","Enough","2ndamendment", "NRA", "liberals","gunsense","gun","gunsafety","gunviolence","stopgunviolence","noguns","banguns","banfirearms","firearms","patriotic","fundamentalright","righttocarry","opencarry","senselessshooting","shooting","assaultrifles","weaponsofmurder","nobanonguns","gunlegislation","nationalrifleassociation","banassaultweapons","banbumpstocks","backgroundchecks","gunreformnow")
+
+democrat_gun = democrat[democrat$hashtags %in% gun_hashtags,]
+repub_gun = repub[repub$hashtags %in% gun_hashtags,]
+
+gun_related = rbind(democrat_gun,repub_gun)
+gun_related = gun_related[order(-gun_related$count_total),]
+datatable(gun_related,caption="Tweets relevant to Firearms related Issues from Democrats and Repblicans")
+
+```
+  
+  
+##Q2) D) Gun Control II - Parkland Shooting  
+The following visualization shows a comparison of the topics discussed on twitter and their frequency and whether it was gun-related.  The timeline for this analysis is the immediate two weeks following the Parkland Shooting.  
+Two peaks for gun related topics are located at 02/15, the next day of the shooting and 02/22, the day on which many students marched for gun control and safety.  
+  
+```{r fig.width=8,fig.height=6}
+stoneman = subset(tags_subset,grepl("2018-02-14|2018-02-15|2018-02-16|2018-02-17|2018-02-18|2018-02-19|2018-02-20|2018-02-21",tags_subset$created_at))
+
+new_stoneman = subset(senator_tweets,grepl("2018-02-1|2018-02-2",senator_tweets$created_at))
+
+new_stoneman = subset(new_stoneman,select=c(2,4,5,11,14))
+
+new_stoneman$gun_related_twt = NA
+
+new_stoneman = as.data.frame(new_stoneman)
+new_stoneman$text = gsub("[^[:alnum:] ]","",new_stoneman$text)
+for(i in 1:nrow(new_stoneman)){
+  if(grepl("NeverAgain|guncontrol|guncontrolnow|2ndamendment|NRA|liberals|gunsense|gun|gunsafety|gunviolence|stopgunviolence|noguns|banguns|banfirearms|firearms|righttocarry|opencarry|senselessshooting|shooting|assaultrifles|weaponsofmurder|nobanonguns|gunlegislation|nationalrifleassociation|banassaultweapons|banbumpstocks|backgroundchecks|gunreformnow|school-shootings|shootings|stoneman|parkland",tolower(as.character(new_stoneman[i,"text"])))){
+    new_stoneman[i,"gun_related_twt"] = 1
+  }
+  else
+    new_stoneman[i,"gun_related_twt"] = 0
+}
+
+new_stoneman$created_at = substring(new_stoneman$created_at,1,10)
+
+new_stoneman_gp=  group_by(new_stoneman,created_at,gun_related_twt)
+new_stoneman_summ = as.data.frame(summarise(new_stoneman_gp,count=n()))
+
+ggplot(new_stoneman_summ,aes(x=created_at,y=count,color=as.factor(gun_related_twt),group=gun_related_twt)) + geom_line(lwd=0.8) +geom_point() + xlab("Date") + ylab("Frequency") + ggtitle("How prevalent were gun-control-related conversations in tweets from senators") + theme_minimal() + theme(axis.text.x=element_text(angle=90,hjust=1))
+```
+  
+  
+##Q3) A) Identifying Re-Tweets  
+
+The first visualization through the use of Datatable provides an insight into how party affiliation plays an important role for conveying message within or across party lines. The most frequent case occurs when the source of the tweet and the person retweeting belong to the same party.  
+  
+```{r fig.width=8,fig.height=6}
+retweets = subset(senator_tweets,is_retweet==TRUE)
+for(i in 1:nrow(retweets)){
+  a = gsub(":.+$", "", retweets[i,"text"])
+  retweets[i,"text"] = substring(a,5,nchar(a))
+}
+
+retweets = retweets[retweets$text %in% senator_party$Twitter_Handle,] 
+retweets = subset(retweets,select=c(4,5))
+colnames(retweets) = c("retweeter","origin")
+
+retweets = merge(retweets,party_list,by.x="retweeter",by.y="Twitter_Handle")
+colnames(retweets)[3] = c("retweeter_party")
+
+retweets = merge(retweets,party_list,by.x="origin",by.y="Twitter_Handle")
+colnames(retweets)[4] = c("origin_party")
+
+retweets_gp = group_by(retweets,origin_party,retweeter_party)
+retweets_summ = as.data.frame(summarise(retweets_gp,count=n()))
+
+datatable(retweets_summ,caption="Summary of Tweet Origin and Retweet across party lines")
+```
+  
+  
+This visualization through the use of a bar chart informs the user about the senators who get frequently retweeted across party lines.    
+  
+```{r fig.width=8,fig.height=6}
+retweets_diff = subset(retweets,origin_party!=retweeter_party)
+diff_gp = group_by(retweets_diff,origin_party,origin)
+diff_summ = as.data.frame(summarise(diff_gp,count=n()))
+diff_summ = diff_summ[order(-diff_summ$count),]
+diff_subset = diff_summ[1:20,]
+ggplot(diff_subset,aes(x=reorder(origin,count),y=count)) + geom_bar(stat="identity") + coord_flip() + xlab("Senators") + ylab("Count") + ggtitle("Senators frequently mentioned across party lines") + theme_minimal()
+```
+
+  
+##Q3) B) Identifying Mentions  
+The following visualization through the use of interconnected-components where the measure of strength of relationship between senators is the number of mentions. The graph is then visualized using party affiliation as differentiator. The next visualization shows the median mention count grouped by party.  
+  
+  
+```{r fig.width=8,fig.height=6}
+mentions = subset(senator_tweets,is_retweet==FALSE)
+mentions = subset(mentions,!is.na(mentions$mentions_screen_name))
+mentions = mentions[mentions$mentions_screen_name %in% party_list$Twitter_Handle,]
+
+mentions = subset(mentions,select=c("screen_name","mentions_screen_name"))
+mentions$mentions_screen_name = as.character(mentions$mentions_screen_name)
+mentions_gp = group_by(mentions,screen_name,mentions_screen_name)
+mentions_summ = as.data.frame(summarise(mentions_gp,count=n()))
+
+mentions_count = group_by(mentions_summ,mentions_screen_name)
+mentions_cnt = as.data.frame(summarise(mentions_count,count=n()))
+
+mention_graph = network(mentions_summ[,1:2]) 
+mnames = data.frame(mentions_screen_name = network.vertex.names(mention_graph))
+mnames = merge(mnames,mentions_cnt,by="mentions_screen_name")
+mnames = merge(mnames,party_list,by.x="mentions_screen_name",by.y="Twitter_Handle")
+mnames$importance_category=NA
+for(i in 1:nrow(mnames)){
+  if(mnames[i,"count"]<=15)
+    mnames[i,"importance_category"] = 1
+  else if(mnames[i,"count"]<=30)
+    mnames[i,"importance_category"] = 2
+  else if(mnames[i,"count"]<=45)
+    mnames[i,"importance_category"] = 3
+  else if(mnames[i,"count"]<=60)
+    mnames[i,"importance_category"] = 4
+  else
+    mnames[i,"importance_category"] = 5
+}
+
+mention_graph %v% "party" = as.character(mnames$Party.affiliation)
+mention_graph %v% "importance" = as.numeric(mnames$importance_category)
+y = c("blue","yellow","red")
+names(y) = levels(mnames$Party.affiliation)
+
+mnames_agg = aggregate(mnames$count,by=list(mnames$Party.affiliation),median)
+
+ggnet2(mention_graph, color = "party",palette = y,alpha = 0.75, size = "importance", edge.alpha = 0.5)
+
+ggplot(mnames_agg,aes(x=reorder(Group.1,x),y=x)) + geom_bar(stat="identity",width=0.2) + coord_flip() + xlab("Party") + ylab("Count") + ggtitle("Median mention count among senators for Political Parties") + theme_minimal()
+
+```
